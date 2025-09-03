@@ -127,19 +127,29 @@ def run_initial_escrow_analysis(items: list[EscrowItem], computation_month: date
         projection=projection,
     )
 
+def _money(x):  # x is a Decimal
+    return f"{x:.2f}"
+
+def _format_disbursements(d: dict[str, "Decimal"]) -> str:
+    if not d:
+        return "{}"
+    # Example: {Property Tax: 3000.00, Home Owners Insurance: 1200.00}
+    inner = ", ".join(f"{k}: {_money(v)}" for k, v in d.items())
+    return "{" + inner + "}"
+
 
 # ---------- Example run (optional) ----------
 if __name__ == "__main__":
     items = [
         EscrowItem(
-            name="County Property Tax",
+            name="Property Tax",
             annual_amount=Decimal("6000.00"),
             frequency=Frequency.SEMIANNUAL,
             next_due_date=date(2025, 11, 15),
             payee="County Treasurer",
         ),
         EscrowItem(
-            name="Homeowners Insurance",
+            name="Home Owners Insurance",
             annual_amount=Decimal("1200.00"),
             frequency=Frequency.ANNUAL,
             next_due_date=date(2026, 6, 1),
@@ -147,9 +157,15 @@ if __name__ == "__main__":
         ),
     ]
     res = run_initial_escrow_analysis(items, date(2025, 9, 1))
-    print("Monthly:", res.monthly_payment)
-    print("Initial deposit:", res.initial_deposit)
-    print("Cushion:", res.cushion_required)
-    print("Annual total:", res.annual_total)
-    for r in res.projection:
-        print(r.month.strftime("%Y-%m"), r.deposit, r.disbursements, r.end_balance)
+
+    print("Monthly:", _money(res.monthly_payment))
+    print("Initial deposit:", _money(res.initial_deposit))
+    print("Cushion:", _money(res.cushion_required))
+    print("Annual total:", _money(res.annual_total))
+
+for r in res.projection:
+    month = r.month.strftime("%Y-%m")
+    monthly = _money(r.deposit)
+    payments = _format_disbursements(r.disbursements)
+    balance = _money(r.end_balance)
+    print(f"Month: {month}  Monthly Payment: {monthly}  Payments Due: {payments}  Total Balance: {balance}")
