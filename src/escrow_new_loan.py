@@ -86,11 +86,7 @@ def _build_calendar(items: list[EscrowItem], start_month: date, months=12):
 
 
 # ---------- Core: initial analysis ----------
-def run_initial_escrow_analysis(
-    items: list[EscrowItem],
-    computation_month: date,
-    cushion_policy_cap: Decimal | None = None,  # absolute cap override (must be <= RESPA or None)
-) -> AnalysisResult:
+def run_initial_escrow_analysis(items: list[EscrowItem], computation_month: date, cushion_policy_cap: Decimal | None = None,) -> AnalysisResult:
     start = computation_month.replace(day=1)
     annual_total = to_cents(sum((it.annual_amount for it in items), Decimal("0")))
     monthly = to_cents(annual_total / Decimal(12))
@@ -122,6 +118,7 @@ def run_initial_escrow_analysis(
         balance = to_cents(balance + monthly - disb_total)
         projection.append(ProjectionRow(month=m, deposit=monthly, disbursements=disb, end_balance=balance))
 
+    # Analysis Result object
     return AnalysisResult(
         monthly_payment=monthly,
         initial_deposit=initial_deposit,
