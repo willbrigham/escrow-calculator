@@ -1,197 +1,254 @@
-from dataclasses import dataclass, field
-from datetime import date, timedelta
-from typing import List, Optional, Dict, Tuple
-import math
+from datetime import date
 
-@dataclass
-class Disbursement:
-    kind: str                 # 'tax', 'hazard', 'flood', 'pmi', 'hoa', etc.
-    amount: float
-    due_date: date            # first due date inside the 12-mo window
-    frequency: str = "annual" # 'annual','semiannual','quarterly','monthly','once'
-    # Generate the next 12 months of instances based on frequency:
-    def expand(self, start: date, months: int = 12) -> List[Tuple[int, float]]:
-        """Return [(month_index_1_to_12, amount), ...] for due dates within the 12-mo window starting at 'start'."""
-        out = []
-        # Helper to add if inside window
-        def add_if_in_window(d: date):
-            if 0 <= (d.year - start.year)*12 + (d.month - start.month) < months:
-                idx = (d.year - start.year)*12 + (d.month - start.month) + 1
-                out.append((idx, self.amount))
-        # Frequency expansion:
-        d = self.due_date
-        if self.frequency == "monthly":
-            # Add at due_date month index, then each month same day (best-effort)
-            cur = date(start.year, start.month, 1)
-            # Align to first of month for simplicity; in production, align to bill cycle day.
-            for i in range(months):
-                mdate = date(cur.year, cur.month, 1)
-                if mdate >= date(d.year, d.month, 1):
-                    add_if_in_window(mdate)
-                # step
-                month = cur.month + 1
-                year = cur.year + (month - 1)//12
-                month = ((month - 1) % 12) + 1
-                cur = date(year, month, 1)
-        elif self.frequency in {"annual","once"}:
-            add_if_in_window(date(self.due_date.year, self.due_date.month, 1))
-        elif self.frequency == "semiannual":
-            for off in (0, 6):
-                m = (self.due_date.month - 1 + off) % 12 + 1
-                y = self.due_date.year + (self.due_date.month - 1 + off)//12
-                add_if_in_window(date(y, m, 1))
-        elif self.frequency == "quarterly":
-            for off in (0, 3, 6, 9):
-                m = (self.due_date.month - 1 + off) % 12 + 1
-                y = self.due_date.year + (self.due_date.month - 1 + off)//12
-                add_if_in_window(date(y, m, 1))
-        else:
-            # default: treat as once
-            add_if_in_window(date(self.due_date.year, self.due_date.month, 1))
-        return out
-
-@dataclass
-class LoanEscrowInput:
-    loan_id: str
-    analysis_start: date
-    escrow_balance: float
-    escrow_cushion_policy: float  # e.g., 2 months equivalent, but we will cap at A/6
-    state_pays_interest: bool
-    interest_on_escrow_amount: float = 0.0  # monthly credit if applicable
-    is_current_for_refund: bool = True
-    waiver_indicator: bool = False
-    delinquent: bool = False
-    bankruptcy: bool = False
-    foreclosure: bool = False
-    service_release_pending: bool = False
-    # PMI handling
-    pmi_indicator: bool = False
-    pmi_monthly: float = 0.0
-    pmi_expected_end: Optional[date] = None
-    # Disbursement lines supplied externally:
-    lines: List[Disbursement] = field(default_factory=list)
-
-@dataclass
-class EscrowResult:
-    annual_disbursements: float
-    allowed_cushion: float
-    new_monthly_escrow: float
-    projected_min_balance: float
-    shortage: float
-    surplus: float
-    shortage_collection_months: int
-    refund_action: str         # 'refund', 'credit', 'hold'
-    notes: List[str]
-
-def build_12mo_schedule(inp: LoanEscrowInput) -> Dict[int, float]:
-    """Return {month_index(1..12): total_disbursement}."""
-    sched: Dict[int, float] = {i: 0.0 for i in range(1, 13)}
-    # Expand core lines
-    for d in inp.lines:
-        for idx, amt in d.expand(inp.analysis_start, months=12):
-            sched[idx] += amt
-    # Add PMI if active and within window
-    if inp.pmi_indicator and inp.pmi_monthly > 0:
-        for m in range(1, 13):
-            m_date = add_months(first_of_month(inp.analysis_start), m-1)
-            if inp.pmi_expected_end and first_of_month(m_date) > first_of_month(inp.pmi_expected_end):
-                break
-            sched[m] += inp.pmi_monthly
-    return sched
-
+# ---- Simple date helpers (month indexing only) ----
 def first_of_month(d: date) -> date:
     return date(d.year, d.month, 1)
 
 def add_months(d: date, n: int) -> date:
     m = d.month - 1 + n
     y = d.year + m // 12
-    m = (m % 12) + 1
+    m = m % 12 + 1
     return date(y, m, 1)
 
-def simulate_running_balance(S0: float, m: float, sched: Dict[int, float], monthly_interest_credit: float, cushion: float) -> Tuple[float, List[float]]:
-    """Return (min_balance, balances_by_month_end). Balance threshold is -cushion."""
-    bal = S0
-    mins = []
-    for i in range(1, 13):
+def parse_ymd(s, default=None):
+    try:
+        y, m, d = map(int, str(s).split("-"))
+        return date(y, m, d)
+    except Exception:
+        return default
+
+# ---- Build a simple 12-month schedule from a single due date + frequency ----
+def add_line_to_schedule(schedule, amount, first_due, start_month, freq):
+    """
+    schedule: dict {1..12 -> float}
+    amount: float
+    first_due: date of the *next* bill
+    start_month: first day of the analysis window (date)
+    freq: 'annual' | 'semiannual' | 'quarterly' | 'monthly' | 'once'
+    """
+    if not amount or amount <= 0 or not first_due:
+        return
+    freq = (freq or "annual").lower()
+    # Map due dates into month indices 1..12
+    def maybe_add(d):
+        # month index relative to start_month
+        idx = (d.year - start_month.year) * 12 + (d.month - start_month.month) + 1
+        if 1 <= idx <= 12:
+            schedule[idx] = schedule.get(idx, 0.0) + float(amount)
+
+    if freq in ("once", "annual"):
+        maybe_add(first_of_month(first_due))
+    elif freq == "semiannual":
+        for off in (0, 6):
+            d = add_months(first_of_month(first_due), off)
+            maybe_add(d)
+    elif freq == "quarterly":
+        for off in (0, 3, 6, 9):
+            d = add_months(first_of_month(first_due), off)
+            maybe_add(d)
+    elif freq == "monthly":
+        # add on the first of each month, starting from first_due month or start window, whichever is later
+        m0 = first_of_month(first_due)
+        for i in range(12):
+            d = add_months(first_of_month(start_month), i)
+            if d >= m0:
+                maybe_add(d)
+    else:
+        maybe_add(first_of_month(first_due))
+
+# ---- Core math: smallest constant monthly deposit so balance never < -cushion ----
+def required_monthly_deposit(start_balance, schedule, monthly_interest_credit, cushion_allowed):
+    """
+    Let balance after j months be: S0 + j*m + j*credit - cumulative_disbursements(j) >= -cushion
+    => m >= (cum_disb(j) - S0 - j*credit - cushion)/j for all j >= 1
+    So choose m = max(0, max_j RHS), rounded up to cents.
+    """
+    S0 = float(start_balance or 0.0)
+    credit = float(monthly_interest_credit or 0.0)
+    cushion = float(cushion_allowed or 0.0)
+
+    cum = 0.0
+    worst_needed = 0.0
+    for j in range(1, 13):
+        cum += float(schedule.get(j, 0.0))
+        rhs = (cum - S0 - j * credit - cushion) / j
+        if rhs > worst_needed:
+            worst_needed = rhs
+    m = max(0.0, worst_needed)
+    # round *up* to cents
+    m = (int(m * 100 + 0.9999)) / 100.0
+    return m
+
+def simulate_balances(S0, m, schedule, monthly_interest_credit):
+    bal = float(S0 or 0.0)
+    credit = float(monthly_interest_credit or 0.0)
+    trail = []
+    for j in range(1, 13):
         bal += m
-        if monthly_interest_credit:
-            bal += monthly_interest_credit
-        bal -= sched.get(i, 0.0)
-        mins.append(bal)
-    return (min(mins) if mins else S0, mins)
+        if credit:
+            bal += credit
+        bal -= float(schedule.get(j, 0.0))
+        trail.append(round(bal, 2))
+    return trail, (min(trail) if trail else bal)
 
-def find_required_monthly_payment(S0: float, sched: Dict[int, float], monthly_interest_credit: float, cushion: float) -> float:
-    """Binary search smallest m so min balance >= -cushion."""
-    A = sum(sched.values())
-    lo = A/12.0  # base line
-    hi = lo + max(2000.0, A)  # a safe upper bound; tighten for production
-    for _ in range(40):
-        mid = (lo + hi) / 2.0
-        min_bal, _ = simulate_running_balance(S0, mid, sched, monthly_interest_credit, cushion)
-        if min_bal >= -cushion:
-            hi = mid
-        else:
-            lo = mid
-    return round(hi, 2)
+# ---- Main entry: minimal calculator that also echoes policy flags for manual handling ----
+def escrow_annual_minimal(record: dict) -> dict:
+    """
+    INPUT: record is a dict with any/all of your fields.
+    This function only *uses* fields that affect the escrow math.
+    Everything else is returned under 'policy_flags' for your manual refund/collection decision.
+    """
 
-def analyze_escrow(inp: LoanEscrowInput) -> EscrowResult:
-    sched = build_12mo_schedule(inp)
-    A = sum(sched.values())
-    # RESPA cap: 1/6 of annual disbursements
-    legal_cushion_cap = A / 6.0
-    allowed_cushion = round(min(inp.escrow_cushion_policy, legal_cushion_cap), 2)
+    # ---------- Parse the few fields that *actually* drive the math ----------
+    S0 = float(record.get("Escrow Balance", 0.0) or 0.0)
 
-    # Solve for new monthly escrow
-    m_new = find_required_monthly_payment(
-        S0=inp.escrow_balance,
-        sched=sched,
-        monthly_interest_credit=(inp.interest_on_escrow_amount if inp.state_pays_interest else 0.0),
-        cushion=allowed_cushion
-    )
+    start = parse_ymd(record.get("Escrow Analysis Completion Date"), default=first_of_month(date.today()))
+    start = first_of_month(start)
 
-    # Compute min with the *new* payment to measure shortage/surplus at analysis
-    min_bal, trail = simulate_running_balance(
-        S0=inp.escrow_balance,
-        m=m_new,
-        sched=sched,
-        monthly_interest_credit=(inp.interest_on_escrow_amount if inp.state_pays_interest else 0.0),
-        cushion=allowed_cushion
-    )
+    # Interest credit: keep this intentionally simple — only treat explicit monthly credit as monthly
+    monthly_interest_credit = 0.0
+    if str(record.get("Interest on Escrow Payment Frequency", "")).lower() in ("monthly", "m"):
+        monthly_interest_credit = float(record.get("Interest on Escrow Payment Amount", 0.0) or 0.0)
 
-    # If min_bal < -cushion, you have a deficiency; binary search guarantees no, but we keep logic general.
-    deficiency = max(0.0, (-allowed_cushion) - min_bal)
+    # Schedule driver fields (keep frequencies simple & explicit)
+    schedule = {i: 0.0 for i in range(1, 13)}
 
-    # Using the new payment, the difference between min_bal and -cushion indicates surplus(+)/shortage(-) at settle-up.
-    # If min_bal > -cushion, that excess will remain at the lowest point; treat as surplus.
-    surplus = max(0.0, min_bal + allowed_cushion)
-    shortage = 0.0 if surplus > 0 else deficiency
+    # TAXES
+    tax_amt = float(record.get("Tax payee amount", record.get("Tax Payee Amount", 0.0)) or 0.0)
+    tax_due = parse_ymd(record.get("Next Tax Due Date"))
+    # If you want semiannual/quarterly taxes, pass 'Tax Frequency' into record. Default = annual (simplest).
+    tax_freq = (record.get("Tax Frequency") or "annual")
+    add_line_to_schedule(schedule, tax_amt, tax_due, start, tax_freq)
 
-    # Policy on actions
-    refund_action = "refund"
-    if not inp.is_current_for_refund or inp.delinquent or inp.bankruptcy or inp.foreclosure or inp.service_release_pending:
-        refund_action = "credit"
-    if surplus <= 50.00:  # RESPA $50 threshold
-        refund_action = "credit"
+    # HAZARD (homeowner's) — include only if escrowed
+    hazard_escrowed = str(record.get("Escrowed Hazard Line", "")).strip().lower() in ("1", "true", "t", "yes", "y")
+    hazard_amt = float(record.get("Hazard Payee Amount", 0.0) or 0.0)
+    hazard_due = parse_ymd(record.get("Next Hazard due date", record.get("Next Hazard Due Date")))
+    if hazard_escrowed and hazard_amt > 0 and hazard_due:
+        add_line_to_schedule(schedule, hazard_amt, hazard_due, start, "annual")
 
-    # Shortage collection months (FNMA conventional: 12 by default)
-    shortage_months = 12
+    # FLOOD / LPI — include if a dollar amount is present; use month 1 if you don't have a due date
+    flood_amt = float(record.get("Flood Premiums Due", record.get("Floor Premiums Due", 0.0)) or 0.0)
+    flood_due = parse_ymd(record.get("Next Flood Due Date")) or start  # simple fallback to month 1
+    if flood_amt > 0:
+        add_line_to_schedule(schedule, flood_amt, flood_due, start, "annual")
 
-    notes = []
-    if inp.state_pays_interest:
-        notes.append("State requires interest on escrow; modeled as monthly credit.")
-    if inp.pmi_indicator and inp.pmi_expected_end:
-        notes.append(f"PMI ends {inp.pmi_expected_end}; PMI included only until that month.")
-    if refund_action != "refund":
-        notes.append("Surplus not refunded due to status/threshold; credited to account per policy.")
+    # PMI — monthly until it ends (if you supply 'PMI Expected End Date')
+    pmi_on = str(record.get("PMI Indicator", "")).strip().lower() in ("1", "true", "t", "yes", "y")
+    pmi_monthly = float(record.get("PMI Premium Amount Monthly", 0.0) or 0.0)
+    pmi_end = parse_ymd(record.get("PMI Expected End Date"))  # optional
+    if pmi_on and pmi_monthly > 0:
+        for j in range(1, 13):
+            mdate = add_months(start, j - 1)
+            if pmi_end and first_of_month(mdate) > first_of_month(pmi_end):
+                break
+            schedule[j] = schedule.get(j, 0.0) + pmi_monthly
 
-    return EscrowResult(
-        annual_disbursements=round(A, 2),
-        allowed_cushion=allowed_cushion,
-        new_monthly_escrow=m_new,
-        projected_min_balance=round(min_bal, 2),
-        shortage=round(shortage, 2),
-        surplus=round(surplus, 2),
-        shortage_collection_months=shortage_months,
-        refund_action=refund_action,
-        notes=notes
-    )
+    # HOA
+    hoa_amt = float(record.get("HOA Amount", 0.0) or 0.0)
+    hoa_due = parse_ymd(record.get("HOA Next Due Date"))
+    hoa_freq = (record.get("HOA Disb Frequency") or "annual")
+    if hoa_amt > 0 and hoa_due:
+        add_line_to_schedule(schedule, hoa_amt, hoa_due, start, hoa_freq)
+
+    # Sum annual disbursements
+    annual_disb = round(sum(schedule.values()), 2)
+
+    # Allowed cushion = min(policy cushion (dollars), A/6). If policy cushion missing, just use A/6.
+    # NOTE: This assumes your "Escrow Cushion" field is already in dollars.
+    # If it's in "months", convert before calling this function.
+    policy_cushion = float(record.get("Escrow Cushion", annual_disb / 6.0) or (annual_disb / 6.0))
+    allowed_cushion = round(min(policy_cushion, annual_disb / 6.0), 2)
+
+    # Solve minimal monthly deposit m so ledger never dips below -cushion
+    m = required_monthly_deposit(S0, schedule, monthly_interest_credit, allowed_cushion)
+
+    # Project balances to get min balance, shortage/surplus
+    trail, min_bal = simulate_balances(S0, m, schedule, monthly_interest_credit)
+    surplus = round(max(0.0, min_bal + allowed_cushion), 2)
+    shortage = round(max(0.0, -(min_bal + allowed_cushion)), 2)  # should be 0.00 given rounding-up on m
+
+    # ---------- Return calculation + selected policy flags for your manual decision ----------
+    policy_flags = {
+        # Refund/collection eligibility toggles you’ll evaluate manually:
+        "Delinquent Taxes Amount": record.get("Delinquint Taxes Amount") or record.get("Delinquent Taxes Amount"),
+        "Bankruptcy Status": record.get("Bankruptcy Status"),
+        "BK Chapter": record.get("BK Chapter"),
+        "Loss Mitigation Status": record.get("Loss Mitigation Status"),
+        "Foreclosure Status": record.get("Foreclosure Status"),
+        "Foreclosure Sale Indicator": record.get("Foreclosure Sale Indicator"),
+        "DIL Due Indicator": record.get("DIL Due Indicator"),
+        "Service Release Indicator": record.get("Service Release Indicator"),
+        "Escrow Cancellation": record.get("Escrow Cancellation"),
+        "Escrowed Indicator": record.get("Escrowed Indicator"),
+        "Escrow Waiver Indicator": record.get("Escrow Waiver Indicator"),
+        "Loan Type": record.get("Loan Type"),
+        "PIF Indicator": record.get("PIF Indicator"),
+        # Label from prior cycle (not used for math, but handy to see):
+        "Surplus/Shortage Indicator": record.get("Surplus/Shortage Indicator"),
+        # State (interest/cushion rules; you may use this manually if you don’t model monthly interest above):
+        "Property State": record.get("Property State"),
+    }
+
+    return {
+        "loan_id": record.get("Loan ID"),
+        "analysis_start": str(start),
+        "annual_disbursements": annual_disb,
+        "allowed_cushion": allowed_cushion,
+        "new_monthly_escrow": round(m, 2),
+        "min_projected_balance": round(min_bal, 2),
+        "surplus": surplus,
+        "shortage": shortage,
+        "monthly_interest_credit": round(monthly_interest_credit, 2),
+        "monthly_schedule": {m: round(v, 2) for m, v in schedule.items()},
+        "month_end_balances": trail,
+        "policy_flags": policy_flags,   # <-- you decide refund/collection using these
+    }
+
+ # Example input
+if __name__ == "__main__":
+    sample = {
+        "Loan ID": "12345",
+        "Escrow Balance": 1200.00,
+        "Escrow Analysis Completion Date": "2025-09-01",
+        "Escrow Cushion": 500.00,  # dollars; if unknown, omit and code will use A/6
+        "Interest on Escrow Payment Amount": 0.00,
+        "Interest on Escrow Payment Frequency": "monthly",
+
+        "Tax Payee Amount": 3600.00,
+        "Next Tax Due Date": "2026-01-01",
+        "Tax Frequency": "semiannual",  # optional; default is 'annual'
+
+        "Escrowed Hazard Line": "true",
+        "Hazard Payee Amount": 1200.00,
+        "Next Hazard Due Date": "2026-05-01",
+
+        "PMI Indicator": "true",
+        "PMI Premium Amount Monthly": 75.00,
+        "PMI Expected End Date": "2026-06-01",  # optional
+
+        "HOA Amount": 300.00,
+        "HOA Disb Frequency": "annual",
+        "HOA Next Due Date": "2026-03-01",
+
+        # Flood (optional)
+        "Flood Premiums Due": 0.0,
+
+        # Policy flags (don’t affect math here)
+        "Delinquent Taxes Amount": 0.0,
+        "Bankruptcy Status": "None",
+        "BK Chapter": None,
+        "Loss Mitigation Status": "None",
+        "Foreclosure Status": "None",
+        "Foreclosure Sale Indicator": "No",
+        "DIL Due Indicator": "No",
+        "Service Release Indicator": "No",
+        "Escrow Cancellation": "No",
+        "Escrowed Indicator": "Yes",
+        "Escrow Waiver Indicator": "No",
+        "Loan Type": "Conventional",
+        "PIF Indicator": "No",
+        "Property State": "NY",
+    }
+    from pprint import pprint
+    pprint(escrow_annual_minimal(sample))

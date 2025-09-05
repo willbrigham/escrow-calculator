@@ -1,0 +1,47 @@
+Data field,How it affects the escrow calculation,How changing the input affects the code
+Loan ID,Identifier only; no impact on math.,No logic change; used for joins/tracking.
+Escrowed Indicator,"If false (waived), do a final settle-up; don’t compute ongoing monthly escrow.",Toggles a code path: skip projection/collection and produce settle-up only.
+Escrow Cushion,Policy cushion cap; legal max is A/6 of annual disbursements; sets lowest allowed balance (−C).,Changes allowed cushion; solver re-computes m so min balance ≥ −C.
+Escrow Analysis Completion Date,Sets 12‑month projection window start (timing of disbursements).,Shifts schedule indices; recompute disbursements and m.
+Surplus/Shortage Indicator,Status from prior cycle; not an input to math.,Ignored as input; can be used for validation only.
+PIF Indicator,"If loan is Paid-in-Full, stop ongoing collection; perform final settle-up.",Switch to termination path; no projection beyond payoff date.
+Service Release Indicator,Refund may be suppressed; surplus credited/held instead.,Alters refund action (refund→credit/hold). No math change.
+Tax Disbursements,Historical actuals; can inform projections when payee amount unknown.,"If used for inference, updates scheduled tax lines; otherwise audit-only."
+Escrow Cancellation,"If escrow is to be canceled, compute final settle-up only.",Switch to settle-up branch; stop future deposits.
+SFHA Indicator,"If in SFHA and flood is escrowed, include flood premium.","Adds flood disbursement line(s) to schedule; affects A, C, m."
+Flood Zone Indicator,Determines whether flood coverage applies.,"Toggles inclusion of flood line(s); affects A, C, m."
+Flood Premiums Due,Dollar amount for flood insurance due in cycle,"Changes flood disbursement amount; affects A, C, m."
+45 Day Letter Cycle,Compliance timing for force-placed policies; not core math.,No math change; may gate whether LPI line is present.
+Cancelled LPI Indicator,"If force-placed policy canceled, remove LPI premium from schedule.",Removes LPI line; lowers A → lowers C → lowers m.
+Escrowed Hazard Line,Presence/details of hazard insurance escrow.,"If active, include hazard line with amount/due date; affects A, C, m."
+Force Placed Policy Indicators,"If LPI (hazard/flood) active, add that premium.","Adds LPI line(s); affects A, C, m."
+VA Loss Claims,Not part of FNMA conventional math; status/eligibility only.,Affects refund policy (credit vs refund) or special handling; no core math change.
+Foreclosure Sale Indicator,"If FC sale occurred/impending, do not refund; may stop collection.",Switch to special-handling path; refund→credit/hold.
+VA Loss Claim (duplicate concept),Same as 'VA Loss Claims'.,Same as above.
+Foreclosure Sale Indicator (duplicate),Duplicate of FC sale indicator.,Same handling as FC sale indicator.
+DIL Due Indicator,Deed-in-Lieu; similar to FC/PIF handling.,Special-handling path; generally credit/hold; may stop collection.
+Interest on Escrow Payment Amount,Monthly credit to escrow (state-specific).,Changes monthly credit; lowers m slightly.
+Interest on Escrow Payment Frequency,"If not monthly, convert to monthly equivalent or credit on due months.",Adjusts credit mapping in schedule generator.
+Delinquent Taxes Amount,"If >0, borrower typically not 'current' → no refund; may need catch-up.",Changes refund action to credit; may insert one-time delinquent tax disbursement.
+Loan Type,"Selects rule set (FNMA conventional: cushion cap A/6, shortage spread 12).",Switches policy parameters; math engine unchanged.
+Bankruptcy Status,"In BK, don’t refund surplus; credit/hold; special collection rules may apply.",Sets flags to change refund action and possibly block collections.
+BK Chapter,"Determines specific BK handling (e.g., Ch. 13 plan).",Selects BK policy branch; math engine unchanged.
+Loss Mitigation Status,Trial mods/forbearance can override refunds/collection timing.,Policy branch selection; math engine unchanged.
+Foreclosure Status,"If FC status active, treat like FC indicator above.",Refund→credit/hold; may stop collection.
+Escrow Balance,Starting balance S₀ of the ledger.,Directly changes trajectory; solver re-computes m; may flip surplus↔shortage.
+Escrow Waiver Indicator,"If true, similar to 'Escrowed Indicator = false.'",Use waive path: final settle-up; no ongoing m.
+PMI Indicator,"If true, include PMI monthly until cancellation/termination month.","Adds monthly PMI line; affects A, C, m; requires expected end if available."
+PMI Premium Amount Monthly,Monthly PMI charge.,"Changes PMI monthly line; affects A, C, m."
+Original LTV,Used to compute PMI auto-cancel date.,Changes PMI expected end date → months of PMI included.
+Escrow Spread Calculator,Whether to compute and spread a shortage across months.,Toggles shortage spread logic; algorithm unchanged.
+Escrow Spread Term,"Months over which shortage is collected (e.g., 12).",Changes shortage collection months; adjusts total escrow bill (m + shortage/term).
+Hazard Payee Amount,Hazard insurance premium for the upcoming cycle.,"Changes hazard line amount; affects A, C, m."
+Tax Payee Amount,Property tax amount for the upcoming installment(s).,"Changes tax line amounts; affects A, C, m."
+Next Hazard Due Date,Next hazard premium due date.,Moves hazard line timing; can materially change m due to timing.
+Next Tax Due Date,Next tax installment due date (first one).,Positions tax line(s) in schedule; timing impacts min balance and m.
+Escrow Balance (duplicate),Duplicate of Escrow Balance.,Same handling as Escrow Balance.
+Pmt Effective Date,Month the new escrow payment becomes effective.,Simulate transition months (old m then new m) depending on effective date.
+HOA Amount,HOA dues amount.,"Adds HOA line(s); affects A, C, m."
+HOA Next Due Date,Next HOA due date.,Places HOA line(s) in schedule; timing affects m.
+HOA Disb Frequency,HOA frequency (monthly/quarterly/annual).,"Expands to multiple schedule entries; affects A, C, m."
+Property State,Drives state rules (escrow interest; sometimes cushion limits).,Sets flags: interest credit and cushion overrides; solver re-computes m accordingly.

@@ -17,54 +17,6 @@ Mortgage escrow / impound account (ongoing): After you get the mortgage, your se
 
 ## How the Code Works
 
-## Data Fields
-Loan ID
-Escrowed Indicator
-Escrow Cushion
-Escrow Analysis Completion Date
-Suplus/Shortage Indicator
-PIF Indicator
-Service Release Indicator
-Tax Disbursements
-Escrow Cancellation
-SFHA Indicator
-Flood Zone Indicator
-Floor Premiums Due
-45 Day Letter Cycle
-Cancelled LPI Indicator
-Escrowed Hazard Line
-Force Placed Policy Indicators
-VA Loss Claims
-Foreclosure Sale Indicator
-VA Loss Claim
-Foreclosure Sale Indicator
-DIL Due Indicator
-Interest on Escrow Payment Amount
-Interest on Escrow Payment Frequency
-Delinquint Taxes Amount
-Loan Type
-Bankruptcy Status
-BK Chapter
-Loss Mitigation Status
-Foreclosure Status
-Escrow Balance
-Escrow Waiver Indicator
-PMI Indicator
-PMI Premium Amount Monthly
-Original LTV
-Escrow Spread Calculator
-Escrow Spread Term
-Hazard Payee Amount
-Tax payee amount
-Next Hazard due date
-Next Tax Due Date 
-Escrow Balance
-Pmt Effective Date
-HOA Amount
-HOA Next Due Date
-HOA Disb Frequency
-Property State
-
 1) What actually drives the escrow math
 
 These fields determine the 12-month disbursement schedule and the payment you need:
