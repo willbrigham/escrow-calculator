@@ -220,11 +220,11 @@ if __name__ == "__main__":
         "Tax Frequency": "semiannual",  # optional; default is 'annual'
 
         "Escrowed Hazard Line": "true",
-        "Hazard Payee Amount": 1200.00,
+        "Hazard Payee Amount": 1200.00, # Home owners insurance
         "Next Hazard Due Date": "2026-05-01",
 
         "PMI Indicator": "true",
-        "PMI Premium Amount Monthly": 75.00,
+        "PMI Premium Amount Monthly": 75.00, # Private Mortgage Insurance on conventional loans
         "PMI Expected End Date": "2026-06-01",  # optional
 
         "HOA Amount": 300.00,
