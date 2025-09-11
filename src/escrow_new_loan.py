@@ -8,12 +8,14 @@ from datetime import date
 def first_of_month(d):
     return date(d.year, d.month, 1)
 
+# add months to get correct disbursement month
 def add_months(d, n):
     m = d.month - 1 + n
     y = d.year + m // 12
     m = m % 12 + 1
     return date(y, m, 1)
 
+# return date format
 def parse_ymd(s, default=None):
     try:
         y, m, d = map(int, str(s).split("-"))
@@ -32,50 +34,50 @@ def add_line_to_schedule(schedule, amount, first_due, start_month, freq):
     """
     if not amount or amount <= 0 or not first_due:
         return
-    freq = (freq or "annual").lower()
+    freq = freq.lower()
     # Map due dates into month indices 1..12
-    def maybe_add(d):
+    def add_disbursement(d):
         # month index relative to start_month
         idx = (d.year - start_month.year) * 12 + (d.month - start_month.month) + 1
         if 1 <= idx <= 12:
             schedule[idx] = schedule.get(idx, 0.0) + float(amount)
 
-    if freq in ("once", "annual"):
-        maybe_add(first_of_month(first_due))
+    if freq in ("annual"):
+        add_disbursement(first_of_month(first_due))
     elif freq == "semiannual":
         for off in (0, 6):
             d = add_months(first_of_month(first_due), off)
-            maybe_add(d)
+            add_disbursement(d)
     elif freq == "quarterly":
         for off in (0, 3, 6, 9):
             d = add_months(first_of_month(first_due), off)
-            maybe_add(d)
+            add_disbursement(d)
     elif freq == "monthly":
         # add on the first of each month, starting from first_due month or start window, whichever is later
         m0 = first_of_month(first_due)
         for i in range(12):
             d = add_months(first_of_month(start_month), i)
             if d >= m0:
-                maybe_add(d)
+                add_disbursement(d)
     else:
-        maybe_add(first_of_month(first_due))
+        add_disbursement(first_of_month(first_due))
 
 # ---- Core math: smallest constant monthly deposit so balance never < -cushion ----
 def required_monthly_deposit(start_balance, schedule, monthly_interest_credit, cushion_allowed):
     """
     Let balance after j months be: S0 + j*m + j*credit - cumulative_disbursements(j) >= -cushion
-    => m >= (cum_disb(j) - S0 - j*credit - cushion)/j for all j >= 1
+    => m >= (cumulative_disb(j) - S0 - j*credit - cushion)/j for all j >= 1
     So choose m = max(0, max_j RHS), rounded up to cents.
     """
-    S0 = float(start_balance or 0.0)
+    S0 = float(start_balance)
     credit = float(monthly_interest_credit or 0.0)
     cushion = float(cushion_allowed or 0.0)
 
-    cum = 0.0
+    cumulative = 0.0
     worst_needed = 0.0
     for j in range(1, 13):
-        cum += float(schedule.get(j, 0.0))
-        rhs = (cum - S0 - j * credit - cushion) / j
+        cumulative += float(schedule.get(j, 0.0))
+        rhs = (cumulative- S0 - j * credit + cushion) / j
         if rhs > worst_needed:
             worst_needed = rhs
     m = max(0.0, worst_needed)
@@ -119,35 +121,32 @@ def escrow_annual_minimal(record: dict) -> dict:
     tax_amt = float(record.get("Tax payee amount", record.get("Tax Payee Amount")))
     tax_due = parse_ymd(record.get("Next Tax Due Date"))
     # Added field; tax freq
-    tax_freq = (record.get("Tax Frequency") or "annual")
+    tax_freq = (record.get("Tax Frequency"))
+    # Add this to the monthly dict
     add_line_to_schedule(schedule, tax_amt, tax_due, start, tax_freq)
 
     # HAZARD (homeowner's) — include only if escrowed
-    hazard_escrowed = str(record.get("Escrowed Hazard Line", "")).strip().lower() in ("1", "true", "t", "yes", "y")
-    hazard_amt = float(record.get("Hazard Payee Amount", 0.0) or 0.0)
-    hazard_due = parse_ymd(record.get("Next Hazard due date", record.get("Next Hazard Due Date")))
+    hazard_escrowed = str(record.get("Escrowed Hazard Line", "")).strip().lower() == "true"
+    hazard_amt = float(record.get("Hazard Payee Amount"))
+    hazard_due = parse_ymd(record.get("Next Hazard Due Date"))
     if hazard_escrowed and hazard_amt > 0 and hazard_due:
         add_line_to_schedule(schedule, hazard_amt, hazard_due, start, "annual")
 
     # FLOOD / LPI — include if a dollar amount is present; use month 1 if you don't have a due date
-    flood_amt = float(record.get("Flood Premiums Due", record.get("Floor Premiums Due", 0.0)) or 0.0)
-    flood_due = parse_ymd(record.get("Next Flood Due Date")) or start  # simple fallback to month 1
+    flood_amt = float(record.get("Flood Premiums Due"))
+    flood_due = parse_ymd(record.get("Next Flood Due Date"))
     if flood_amt > 0:
         add_line_to_schedule(schedule, flood_amt, flood_due, start, "annual")
 
     # PMI — monthly until it ends (if you supply 'PMI Expected End Date')
-    pmi_on = str(record.get("PMI Indicator", "")).strip().lower() in ("1", "true", "t", "yes", "y")
-    pmi_monthly = float(record.get("PMI Premium Amount Monthly", 0.0) or 0.0)
-    pmi_end = parse_ymd(record.get("PMI Expected End Date"))  # optional
+    pmi_on = str(record.get("PMI Indicator", "")).strip().lower() == "true"
+    pmi_monthly = float(record.get("PMI Premium Amount Monthly"))
     if pmi_on and pmi_monthly > 0:
         for j in range(1, 13):
-            mdate = add_months(start, j - 1)
-            if pmi_end and first_of_month(mdate) > first_of_month(pmi_end):
-                break
             schedule[j] = schedule.get(j, 0.0) + pmi_monthly
 
     # HOA
-    hoa_amt = float(record.get("HOA Amount", 0.0) or 0.0)
+    hoa_amt = float(record.get("HOA Amount"))
     hoa_due = parse_ymd(record.get("HOA Next Due Date"))
     hoa_freq = (record.get("HOA Disb Frequency") or "annual")
     if hoa_amt > 0 and hoa_due:
@@ -159,7 +158,7 @@ def escrow_annual_minimal(record: dict) -> dict:
     # Allowed cushion = min(policy cushion (dollars), A/6). If policy cushion missing, just use A/6.
     # NOTE: This assumes your "Escrow Cushion" field is already in dollars.
     # If it's in "months", convert before calling this function.
-    policy_cushion = float(record.get("Escrow Cushion", annual_disb / 6.0) or (annual_disb / 6.0))
+    policy_cushion = float(record.get("Escrow Cushion", annual_disb / 6.0))
     allowed_cushion = round(min(policy_cushion, annual_disb / 6.0), 2)
 
     # Solve minimal monthly deposit m so ledger never dips below -cushion
@@ -235,6 +234,7 @@ if __name__ == "__main__":
 
         # Flood Insurance?
         "Flood Premiums Due": 0.0,
+        "Next Flood Due Date": None,
 
         # Policy flags (don’t affect math)
         "Delinquent Taxes Amount": 0.0,
