@@ -208,33 +208,33 @@ def escrow_annual_minimal(record: dict) -> dict:
  # Example input
 if __name__ == "__main__":
     sample = {
-        "Loan ID": "12345",
-        "Escrow Balance": 1200.00,
-        "Escrow Analysis Completion Date": "2025-09-01",
-        "Escrow Cushion": 500.00,  # dollars; if unknown, omit and code will use A/6
+        # these input fields will impact escrow calculation
+        "Loan ID": "12345", # loan identifier
+        "Escrow Balance": 1200.00, # start balance
+        "Escrow Analysis Completion Date": "2025-09-01", # start date
+        "Escrow Cushion": 500.00,  # if unknown - omit and code will use A/6
         "Interest on Escrow Payment Amount": 0.00,
         "Interest on Escrow Payment Frequency": "monthly",
 
-        "Tax Payee Amount": 3600.00,
+        "Tax Payee Amount": 3600.00, # property tax
         "Next Tax Due Date": "2026-01-01",
-        "Tax Frequency": "semiannual",  # optional; default is 'annual'
+        "Tax Frequency": "semiannual",  # optional; default is 'annual'; I added this field
 
         "Escrowed Hazard Line": "true",
-        "Hazard Payee Amount": 1200.00, # Home owners insurance
+        "Hazard Payee Amount": 1200.00, # home owners insurance
         "Next Hazard Due Date": "2026-05-01",
 
         "PMI Indicator": "true",
-        "PMI Premium Amount Monthly": 75.00, # Private Mortgage Insurance on conventional loans
-        "PMI Expected End Date": "2026-06-01",  # optional
+        "PMI Premium Amount Monthly": 75.00, # private mortgage insurance on conventional loans
 
         "HOA Amount": 300.00,
         "HOA Disb Frequency": "annual",
         "HOA Next Due Date": "2026-03-01",
 
-        # Flood (optional)
+        # Flood Insurance?
         "Flood Premiums Due": 0.0,
 
-        # Policy flags (don’t affect math here)
+        # Policy flags (don’t affect math)
         "Delinquent Taxes Amount": 0.0,
         "Bankruptcy Status": "None",
         "BK Chapter": None,
@@ -246,9 +246,10 @@ if __name__ == "__main__":
         "Escrow Cancellation": "No",
         "Escrowed Indicator": "Yes",
         "Escrow Waiver Indicator": "No",
-        "Loan Type": "Conventional",
+        "Loan Type": "Conventional", # First scenario is a conventional loan
         "PIF Indicator": "No",
         "Property State": "NY",
+        "Flood Zone Indicator" : False
     }
     from pprint import pprint
     pprint(escrow_annual_minimal(sample))

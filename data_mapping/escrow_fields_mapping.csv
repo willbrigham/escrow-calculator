@@ -17,8 +17,6 @@ Escrowed Hazard Line,Presence/details of hazard insurance escrow.,"If active, in
 Force Placed Policy Indicators,"If LPI (hazard/flood) active, add that premium.","Adds LPI line(s); affects A, C, m."
 VA Loss Claims,Not part of FNMA conventional math; status/eligibility only.,Affects refund policy (credit vs refund) or special handling; no core math change.
 Foreclosure Sale Indicator,"If FC sale occurred/impending, do not refund; may stop collection.",Switch to special-handling path; refund→credit/hold.
-VA Loss Claim (duplicate concept),Same as 'VA Loss Claims'.,Same as above.
-Foreclosure Sale Indicator (duplicate),Duplicate of FC sale indicator.,Same handling as FC sale indicator.
 DIL Due Indicator,Deed-in-Lieu; similar to FC/PIF handling.,Special-handling path; generally credit/hold; may stop collection.
 Interest on Escrow Payment Amount,Monthly credit to escrow (state-specific).,Changes monthly credit; lowers m slightly.
 Interest on Escrow Payment Frequency,"If not monthly, convert to monthly equivalent or credit on due months.",Adjusts credit mapping in schedule generator.
@@ -30,18 +28,21 @@ Loss Mitigation Status,Trial mods/forbearance can override refunds/collection ti
 Foreclosure Status,"If FC status active, treat like FC indicator above.",Refund→credit/hold; may stop collection.
 Escrow Balance,Starting balance S₀ of the ledger.,Directly changes trajectory; solver re-computes m; may flip surplus↔shortage.
 Escrow Waiver Indicator,"If true, similar to 'Escrowed Indicator = false.'",Use waive path: final settle-up; no ongoing m.
+Escrow Waiver Date,"Waiver?", ??.
 PMI Indicator,"If true, include PMI monthly until cancellation/termination month.","Adds monthly PMI line; affects A, C, m; requires expected end if available."
 PMI Premium Amount Monthly,Monthly PMI charge.,"Changes PMI monthly line; affects A, C, m."
 Original LTV,Used to compute PMI auto-cancel date.,Changes PMI expected end date → months of PMI included.
-Escrow Spread Calculator,Whether to compute and spread a shortage across months.,Toggles shortage spread logic; algorithm unchanged.
+Current LTV,Same as above?, same as above.
+Escrow Spread Indicator,Whether to compute and spread a shortage across months.,Toggles shortage spread logic; algorithm unchanged.
 Escrow Spread Term,"Months over which shortage is collected (e.g., 12).",Changes shortage collection months; adjusts total escrow bill (m + shortage/term).
 Hazard Payee Amount,Hazard insurance premium for the upcoming cycle.,"Changes hazard line amount; affects A, C, m."
 Tax Payee Amount,Property tax amount for the upcoming installment(s).,"Changes tax line amounts; affects A, C, m."
 Next Hazard Due Date,Next hazard premium due date.,Moves hazard line timing; can materially change m due to timing.
 Next Tax Due Date,Next tax installment due date (first one).,Positions tax line(s) in schedule; timing impacts min balance and m.
-Escrow Balance (duplicate),Duplicate of Escrow Balance.,Same handling as Escrow Balance.
+Escrow Balance, Starting Balance, starting balance.
 Pmt Effective Date,Month the new escrow payment becomes effective.,Simulate transition months (old m then new m) depending on effective date.
 HOA Amount,HOA dues amount.,"Adds HOA line(s); affects A, C, m."
 HOA Next Due Date,Next HOA due date.,Places HOA line(s) in schedule; timing affects m.
 HOA Disb Frequency,HOA frequency (monthly/quarterly/annual).,"Expands to multiple schedule entries; affects A, C, m."
 Property State,Drives state rules (escrow interest; sometimes cushion limits).,Sets flags: interest credit and cushion overrides; solver re-computes m accordingly.
+LPI Premium Amount, unsure, unsure.
