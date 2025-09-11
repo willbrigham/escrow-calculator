@@ -1,10 +1,14 @@
+# William Brigham
+# 09-07-2025
+
 from datetime import date
 
-# ---- Simple date helpers (month indexing only) ----
-def first_of_month(d: date) -> date:
+# ---- date helpers ----
+# return the first of the month
+def first_of_month(d):
     return date(d.year, d.month, 1)
 
-def add_months(d: date, n: int) -> date:
+def add_months(d, n):
     m = d.month - 1 + n
     y = d.year + m // 12
     m = m % 12 + 1
@@ -91,32 +95,30 @@ def simulate_balances(S0, m, schedule, monthly_interest_credit):
         trail.append(round(bal, 2))
     return trail, (min(trail) if trail else bal)
 
-# ---- Main entry: minimal calculator that also echoes policy flags for manual handling ----
+# ---- Main entry: minimal calculator ----
 def escrow_annual_minimal(record: dict) -> dict:
     """
     INPUT: record is a dict with any/all of your fields.
     This function only *uses* fields that affect the escrow math.
     Everything else is returned under 'policy_flags' for your manual refund/collection decision.
     """
+    # Get the starting balance
+    S0 = float(record.get("Escrow Balance"))
 
-    # ---------- Parse the few fields that *actually* drive the math ----------
-    S0 = float(record.get("Escrow Balance", 0.0) or 0.0)
-
-    start = parse_ymd(record.get("Escrow Analysis Completion Date"), default=first_of_month(date.today()))
+    # Get start date
+    start = parse_ymd(record.get("Escrow Analysis Completion Date"))
     start = first_of_month(start)
 
-    # Interest credit: keep this intentionally simple — only treat explicit monthly credit as monthly
-    monthly_interest_credit = 0.0
-    if str(record.get("Interest on Escrow Payment Frequency", "")).lower() in ("monthly", "m"):
-        monthly_interest_credit = float(record.get("Interest on Escrow Payment Amount", 0.0) or 0.0)
+    # Interest credit
+    monthly_interest_credit = float(record.get("Interest on Escrow Payment Amount"))
 
-    # Schedule driver fields (keep frequencies simple & explicit)
+    # Create dict for months
     schedule = {i: 0.0 for i in range(1, 13)}
 
-    # TAXES
-    tax_amt = float(record.get("Tax payee amount", record.get("Tax Payee Amount", 0.0)) or 0.0)
+    # Property tax
+    tax_amt = float(record.get("Tax payee amount", record.get("Tax Payee Amount")))
     tax_due = parse_ymd(record.get("Next Tax Due Date"))
-    # If you want semiannual/quarterly taxes, pass 'Tax Frequency' into record. Default = annual (simplest).
+    # Added field; tax freq
     tax_freq = (record.get("Tax Frequency") or "annual")
     add_line_to_schedule(schedule, tax_amt, tax_due, start, tax_freq)
 
@@ -227,7 +229,7 @@ if __name__ == "__main__":
         "PMI Indicator": "true",
         "PMI Premium Amount Monthly": 75.00, # private mortgage insurance on conventional loans
 
-        "HOA Amount": 300.00,
+        "HOA Amount": 300.00, # home owners association dues
         "HOA Disb Frequency": "annual",
         "HOA Next Due Date": "2026-03-01",
 
